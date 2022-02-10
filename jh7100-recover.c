@@ -54,7 +54,7 @@ struct xmodem_packet {
 } __attribute__((packed));
 
 static const char bootrom_str[] = "(C)SiFive";
-static const char success_str[] = "updata success";
+static const char success_str[] = "updata flash ok";
 static const char xmodem_str[] = "send a file by xmodem";
 
 static const char *serial_device;
@@ -207,7 +207,7 @@ static int xmodem_send(int serial_f, const char *filename)
 	return 0;
 }
 
-static int open_serial(const char *path, int baud, int canonical)
+static int open_serial(const char *path, int baud)
 {
 	int fd;
 	struct termios tty;
@@ -230,11 +230,7 @@ static int open_serial(const char *path, int baud, int canonical)
 	cfsetispeed(&tty, baud);
 
 	tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
-	if(canonical)
-		tty.c_lflag |= ICANON;
-	else
-		tty.c_lflag = 0;
-
+	tty.c_lflag = 0;
 	tty.c_oflag = 0;
 	tty.c_cc[VMIN]  = 1;
 	tty.c_cc[VTIME] = 10;
@@ -252,38 +248,30 @@ static int open_serial(const char *path, int baud, int canonical)
 	return fd;
 }
 
-static void check_success(void)
+static void send_command(int fd, const char *str)
 {
-	int ret, serial_f;
-	char buf[BUFF_SIZE];
+	int ret;
 
-	printf("Awaiting confirmation...\n");
-
-	serial_f = open_serial(serial_device, DEBUG_BAUD, 1);
-	if (serial_f < 0)
-		exit(EXIT_FAILURE);
-
-	do {
-		ret = read(serial_f, buf, sizeof(buf));
-		buf[ret] = '\0';
-
-		debug("GOT[%d]:%s", ret, buf);
-	} while(strcmp(success_str, buf));
-	debug("Hit: updata success");
-
-	printf("done.\n\n");
-	close(serial_f);
+	while (*str) {
+		ret = write(fd, str, 1);
+		if (ret == -1) {
+			if (errno == EAGAIN)
+				continue;
+			perror("write");
+			exit(EXIT_FAILURE);
+		}
+		if (ret == 1) {
+			printf("%c", *str);
+			++str;
+		}
+	}
 }
 
-static void wait_for(const char *str)
+static void wait_for(int fd, const char *str)
 {
-	int fd, ret;
+	int ret;
 	char buf;
 	const char *pos = str;
-
-	fd = open_serial(serial_device, DEBUG_BAUD, 1);
-	if (fd < 0)
-		exit(EXIT_FAILURE);
 
 	while (*pos) {
 		ret = read(fd, &buf, 1);
@@ -296,104 +284,68 @@ static void wait_for(const char *str)
 		if (!ret)
 			continue;
 
-		debug("0x%2x, %c", buf, buf < 0x20 ? ' ' : buf);
+		printf("%c", buf);
 		if (*pos == buf)
 			++pos;
 		else
 			pos = str;
 	}
-	close(fd);
+	printf("\n");
 }
 
-static void initialize(void)
+static void check_success(int fd)
+{
+	printf("Awaiting confirmation...\n");
+
+	wait_for(fd, success_str);
+
+	printf("done.\n");
+}
+
+static void initialize(int fd)
 {
 	printf("Waiting for bootloader mode on %s...\n", serial_device);
 
-	wait_for(bootrom_str);
+	wait_for(fd, bootrom_str);
 
 	printf("Bootloader mode active\n\n");
 }
 
-static void send_recovery(const char *filename)
+static void send_recovery(int fd, const char *filename)
 {
-	int ret, serial_f;
-	char cmd1[] = "load 0x18000000\n";
-	char cmd2[] = "do 0x18000000\n";
+	int ret;
+	const char cmd1[] = "load 0x18000000\n";
+	const char cmd2[] = "do 0x18000000\n";
 
-	serial_f = open_serial(serial_device, DEBUG_BAUD, 0);
-	if (serial_f < 0)
-		exit(EXIT_FAILURE);
+	send_command(fd, cmd1);
 
-	ret = write(serial_f, &cmd1, sizeof(cmd1));
-	if (ret != sizeof(cmd1))
-		exit(EXIT_FAILURE);
-
-	ret = xmodem_send(serial_f, filename);
+	ret = xmodem_send(fd, filename);
 	if (ret < 0)
 		exit(EXIT_FAILURE);
 
-	ret = write(serial_f, &cmd2, sizeof(cmd2));
-	if (ret != sizeof(cmd2))
-		exit(EXIT_FAILURE);
-
-	fflush(stdout);
-	close(serial_f);
+	send_command(fd, cmd2);
 }
 
-static void select_update_option(int option)
+static void select_update_option(int fd, int option)
 {
-	int ret, serial_f;
-	char buf[BUFF_SIZE];
-	uint8_t new_line[] = {13,10};
-	char o1[] = "0\r\n";
-	char o2[] = "1\r\n";
+        const char new_line[] = "\r\n";
+	const char o1[] = "0\r\n";
+	const char o2[] = "1\r\n";
 
-	serial_f = open_serial(serial_device, DEBUG_BAUD, 1);
-	if (serial_f < 0)
-		exit(EXIT_FAILURE);
+	if (option)
+		send_command(fd, o2);
+	else
+		send_command(fd, o1);
 
-	if(option) {
-		ret = write(serial_f, &o2, sizeof(o2));
-		if (ret != sizeof(o2))
-			exit(EXIT_FAILURE);
-		debug("SEND[%lu]:%s", sizeof(o2), o2);
-	} else {
-		ret = write(serial_f, &o1, sizeof(o1));
-		if (ret != sizeof(o1))
-			exit(EXIT_FAILURE);
-		debug("SEND[%lu]:%s", sizeof(o1), o1);
-	}
+	send_command(fd, new_line);
 
-	ret = write(serial_f, &new_line, sizeof(new_line));
-	if (ret != sizeof(new_line))
-		exit(EXIT_FAILURE);
-	debug("SEND[%lu]:CR LF", sizeof(new_line));
-
-	do {
-		ret = read(serial_f, buf, BUFF_SIZE);
-		buf[ret] = '\0';
-
-		debug("GOT[%d]:%s", ret, buf);
-	} while(strcmp(xmodem_str, buf));
-	debug("Hit: send a file by xmodem");
-
-	close(serial_f);
+	wait_for(fd, xmodem_str);
 }
 
-static void update_firmware(const char *filename)
+static void update_firmware(int fd, const char *filename)
 {
-	int ret, serial_f;
-
-	serial_f = open_serial(serial_device, DEBUG_BAUD, 0);
-	if (serial_f < 0)
-		exit(EXIT_FAILURE);
-
-	ret = xmodem_send(serial_f, filename);
-	if (ret < 0)
-		exit(EXIT_FAILURE);
-
-	close(serial_f);
-	check_success();
+	xmodem_send(fd, filename);
+	check_success(fd);
 }
 
 static void usage(void)
@@ -420,6 +372,7 @@ static const struct option long_options[] = {
 int main(int argc, char **argv)
 {
 	char c, *recovery_f = NULL, *bootloader_f = NULL, *ddr_init_f = NULL;
+	int fd = -1;
 
 	progname = argv[0];
 
@@ -446,37 +399,41 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if(serial_device) {
-		initialize();
-	} else {
+	if (!serial_device) {
 		fprintf(stderr, "Need serial device path.\n");
 		goto error;
 	}
 
-	if(recovery_f) {
-		printf("Uploading recovery binary...\n");
-		send_recovery(recovery_f);
-		printf("\n----------Enter recovery mode----------\n");
-	} else {
+	if (!recovery_f) {
 		fprintf(stderr, "Need recovery file.\n");
 		goto error;
 	}
 
-	if (bootloader_f || ddr_init_f) {
-		if(bootloader_f) {
-			printf("Updating bootloader...\n");
-			select_update_option(0);
-			update_firmware(bootloader_f);
-		}
+	fd = open_serial(serial_device, DEBUG_BAUD);
+	if (fd == -1)
+		goto error;
 
-		if(ddr_init_f) {
-			printf("Updating dduinit...\n");
-			select_update_option(1);
-			update_firmware(ddr_init_f);
-		}
-		printf("\nFirmware update completed!\n");
-		exit(EXIT_SUCCESS);
+	initialize(fd);
+
+	printf("Uploading recovery binary...\n");
+	send_recovery(fd, recovery_f);
+	printf("\n----------Enter recovery mode----------\n");
+
+	if (bootloader_f) {
+		printf("Updating bootloader...\n");
+		select_update_option(fd, 0);
+		update_firmware(fd, bootloader_f);
 	}
+
+	if (ddr_init_f) {
+		printf("Updating ddrinit...\n");
+		select_update_option(fd, 1);
+		update_firmware(fd, ddr_init_f);
+	}
+	printf("\nFirmware update completed!\n");
+
+	close(fd);
+	exit(EXIT_SUCCESS);
 
 error:
 	usage();
