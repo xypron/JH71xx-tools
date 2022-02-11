@@ -117,7 +117,7 @@ static int xmodem_send(int serial_f, const char *filename)
 	struct xmodem_packet packet;
 	double progress;
 
-	fd = open(filename, O_RDWR | O_SYNC);
+	fd = open(filename, O_RDONLY | O_SYNC);
 	if (fd < 0) {
 		fprintf(stderr, "Can NOT open file: %s", filename);
 		return -errno;
@@ -328,16 +328,15 @@ static void send_recovery(int fd, const char *filename)
 
 static void select_update_option(int fd, int option)
 {
-        const char new_line[] = "\r\n";
 	const char o1[] = "0\r\n";
 	const char o2[] = "1\r\n";
+
+	wait_for(fd, "Select the function to test");
 
 	if (option)
 		send_command(fd, o2);
 	else
 		send_command(fd, o1);
-
-	send_command(fd, new_line);
 
 	wait_for(fd, xmodem_str);
 }
