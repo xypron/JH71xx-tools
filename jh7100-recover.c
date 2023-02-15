@@ -40,7 +40,7 @@
 #define PBSTR "########################################"
 #define PBWIDTH 40
 
-#define DEBUG_BAUD B9600
+#define DEBUG_BAUD B115200
 
 #define XMODEM_PAYLOAD_LEN	128	/* the length of xmodem packet payload*/
 #define BUFF_SIZE		128	/* the length of buffer*/
@@ -53,9 +53,10 @@ struct xmodem_packet {
 	uint16_t crc;
 } __attribute__((packed));
 
-static const char bootrom_str[] = "(C)SiFive";
-static const char success_str[] = "updata flash ok";
-static const char xmodem_str[] = "send a file by xmodem";
+//static const char bootrom_str[] = "(C)StarFive";
+static const char bootrom_str[] = "CCCCCCCCC";
+static const char success_str[] = "updata success";
+static const char xmodem_str[] = "send file by xmodem";
 
 static const char *serial_device;
 static const char *progname;
@@ -152,7 +153,6 @@ static int xmodem_send(int serial_f, const char *filename)
 	while (len) {
 		size_t z = 0;
 		int next = 0;
-//		char status;
 
 		z = min(len, sizeof(packet.payload));
 		memcpy(packet.payload, buf, z);
@@ -171,16 +171,14 @@ static int xmodem_send(int serial_f, const char *filename)
 
 		switch (response) {
 		case NAK:
-//			status = 'N';
+			next = 1;
 			break;
 
 		case ACK:
-//			status = '.';
 			next = 1;
 			break;
 
 		default:
-//			status = '?';
 			next = 1;
 			break;
 		}
@@ -314,24 +312,19 @@ static void initialize(int fd)
 static void send_recovery(int fd, const char *filename)
 {
 	int ret;
-	const char cmd1[] = "load 0x18000000\n";
-	const char cmd2[] = "do 0x18000000\n";
-
-	send_command(fd, cmd1);
 
 	ret = xmodem_send(fd, filename);
 	if (ret < 0)
 		exit(EXIT_FAILURE);
-
-	send_command(fd, cmd2);
 }
 
 static void select_update_option(int fd, int option)
 {
 	const char o1[] = "0\r\n";
-	const char o2[] = "1\r\n";
+	const char o2[] = "2\r\n";
 
-	wait_for(fd, "Select the function to test");
+	// wait_for(fd, "Select the function to test");
+	wait_for(fd, "to change.");
 
 	if (option)
 		send_command(fd, o2);
@@ -353,24 +346,24 @@ static void usage(void)
 		"Usage: %s [OPTION]... \n"
 		"-D, --device <tty device>	: Serial tty device path.\n"
 		"-r, --recovery <filename>	: Bootloader recovery firmware.\n"
-		"-b, --bootloader <filename>	: Second stage bootloader.\n"
-		"-d, --ddrinit <filename>	: DRAM initialization firmware.\n"
+		"-s, --spl <filename>		: U-Boot SPL\n"
+		"-u, --uboot <filename>	        : main U-Boot\n"
 		"-h, --help			: Show this help.\n", progname);
 }
 
-static const char *optstring = "-hD:r:b:d:";
+static const char *optstring = "-hD:r:s:u:";
 static const struct option long_options[] = {
 	{ "device", 1, NULL, 'D' },
 	{ "recovery", 1, NULL, 'r' },
-	{ "bootloader", 1, NULL, 'b' },
-	{ "ddrinit", 1, NULL, 'd' },
+	{ "spl", 1, NULL, 's' },
+	{ "uboot", 1, NULL, 'u' },
 	{ "help", 0, NULL, 'h' },
 	{ NULL, 0, NULL, 0 },
 };
 
 int main(int argc, char **argv)
 {
-	char *recovery_f = NULL, *bootloader_f = NULL, *ddr_init_f = NULL;
+	char *recovery_f = NULL, *spl_f = NULL, *uboot_f = NULL;
 	int c, fd = -1;
 
 	progname = argv[0];
@@ -380,11 +373,11 @@ int main(int argc, char **argv)
 		case 'r':
 			recovery_f = optarg;
 			break;
-		case 'b':
-			bootloader_f = optarg;
+		case 's':
+			spl_f = optarg;
 			break;
-		case 'd':
-			ddr_init_f = optarg;
+		case 'u':
+			uboot_f = optarg;
 			break;
 		case 'D':
 			serial_device = optarg;
@@ -416,18 +409,20 @@ int main(int argc, char **argv)
 
 	printf("Uploading recovery binary...\n");
 	send_recovery(fd, recovery_f);
+	wait_for(fd, "JH7110 secondboot version");
 	printf("\n----------Enter recovery mode----------\n");
 
-	if (bootloader_f) {
-		printf("Updating bootloader...\n");
+
+	if (spl_f) {
+		printf("Updating SPL...\n");
 		select_update_option(fd, 0);
-		update_firmware(fd, bootloader_f);
+		update_firmware(fd, spl_f);
 	}
 
-	if (ddr_init_f) {
-		printf("Updating ddrinit...\n");
-		select_update_option(fd, 1);
-		update_firmware(fd, ddr_init_f);
+	if (uboot_f) {
+		printf("Updating U-Boot...\n");
+		select_update_option(fd, 2);
+		update_firmware(fd, uboot_f);
 	}
 	printf("\nFirmware update completed!\n");
 
