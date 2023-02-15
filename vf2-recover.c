@@ -1,11 +1,16 @@
+// SPDX-License-Identifier: MIT
 /*
- * This simple tool developed for the StarFive JH7100 SoC. The BootROM
- * XMODEM protocol implimentation has a bug that prevents standard
- * lrzsz tools to send files over XMODEM.
+ * This tool serves to recover the VisionFive 2 board.
+ *
+ * Set the boot source DIP switches to UART.
+ * Start this program.
+ * Thereafter switch the board on.
+ *
+ * This tool is needed because the BootROM of the VisionFive 2 board
+ * does not conform to the XMODEM CRC protocol definitions. Too many
+ * NAKs are sent in a row.
  *
  * Copyright (c) 2021 Kali Prasad <kprasadvnsi@protonmail.com>
- *
- * License: MIT
  */
 
 #include <errno.h>

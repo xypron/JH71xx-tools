@@ -1,5 +1,5 @@
-#PROG_FILE=jh7100-recover.c
-PROG_NAME=jh7100-recover
+#PROG_FILE=vf2-recover.c
+PROG_NAME=vf2-recover
 
 CFLAGS := -Wall
 
