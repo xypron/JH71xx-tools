@@ -40,7 +40,7 @@
 #define PBSTR "########################################"
 #define PBWIDTH 40
 
-#define DEBUG_BAUD 9600
+#define DEBUG_BAUD B9600
 
 #define XMODEM_PAYLOAD_LEN	128	/* the length of xmodem packet payload*/
 #define BUFF_SIZE		128	/* the length of buffer*/
